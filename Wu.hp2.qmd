@@ -1,0 +1,277 @@
+---
+title: "Wu.hp2"
+author: "Boyan Wu"
+format: html
+---
+
+#This project is about the NBA dataset involving tweets comments from every team on Kaggle. There are four significant questions: 1. What teams people like the most by doing sentiment analysis? 2. What the top 30 words/phrases are popular to use when tweeting? 3. what are the most followers/friends in every team? 4. What are the relationships between retweet count and comments? 5. What can you tell from the geographic location of these commenters?
+
+#In the NBA dataset, I will use file_name, follower, friends location, retweet_count, text and username as variables to address the questions.
+
+#Import Dataset
+```{r}
+library(tidyverse)
+library(tidyr)
+library(readxl)
+library(here)
+here::i_am("Wu.hp2.qmd")
+NBA_Dataset <- read_csv(here("NBADataset - 13-09-2020 till 13-10-2020.csv"))
+NBA_Dataset2 <- read_csv(here("NBADataset - 12-07-2020 till 19-09-2020.csv")) 
+```
+
+#DATA CLEANING AND TIDYING:
+#Rename and Delete the unnecessary column
+```{r}
+NBA_Dataset <- NBA_Dataset %>%
+  rename(NBAteam = file_name, comment = text) %>%
+  select(-created_at, -group_name, -screenname, -search_query, -twitter_id, -polarity, -partition_0, -partition_1)
+
+NBA_Dataset2 <- NBA_Dataset2 %>%
+  rename(NBAteam = file_name, comment = text) %>%
+  select(-created_at, -group_name, -screenname, -search_query, -twitter_id, -polarity, -partition_0, -partition_1)
+```
+#Check for missing/malformed data
+```{r}
+# Check for missing values
+summary(NBA_Dataset)
+summary(NBA_Dataset2)
+
+# Remove rows with missing data
+NBA_Dataset <- NBA_Dataset %>%
+  filter(!is.na(location), !is.na(comment), !is.na(NBAteam), !is.na(followers), !is.na(friends), !is.na(retweet_count), !is.na(username))
+
+NBA_Dataset2 <- NBA_Dataset2 %>%
+  filter(!is.na(location), !is.na(comment), !is.na(NBAteam), !is.na(followers), !is.na(friends), !is.na(retweet_count), !is.na(username))
+
+```
+#Set variable types
+```{r}
+# Change data types
+NBA_Dataset <- NBA_Dataset %>%
+  mutate(NBAteam = as.factor(NBAteam))
+
+NBA_Dataset2 <- NBA_Dataset2 %>%
+  mutate(NBAteam = as.factor(NBAteam))
+
+```
+#GENERAL DATA WRANGLING:
+#Filtering data
+```{r}
+df_filtered_NBA_Dataset <- NBA_Dataset %>%
+  filter(followers >= 5000, friends >= 3000, retweet_count >= 0) %>%
+  distinct(username, .keep_all = TRUE) 
+  
+df_filtered_NBA_Dataset2 <- NBA_Dataset2 %>%
+  filter(followers >= 5000, friends >= 3000, retweet_count >= 0) %>%
+  distinct(username, .keep_all = TRUE)
+
+#what username has the total most followers and friends in every team of both df_filtered dataset?
+most_followers_and_friends <- df_filtered_NBA_Dataset %>%
+  mutate(followers_friends = followers + friends) %>%
+  group_by(NBAteam) %>%
+  top_n(1, followers_friends) %>%
+  arrange(desc(followers_friends))
+
+most_followers_and_friends2 <- df_filtered_NBA_Dataset2 %>%
+  mutate(followers_friends = followers + friends) %>%
+  group_by(NBAteam) %>%
+  top_n(1, followers_friends) %>%
+  arrange(desc(followers_friends)) 
+
+# Interestingly, Username WORLDSTARHIPHOP won both for the total most followers and friends in LosAngelesLakers team(5200830) in NBA_Dataset, and MilwaukeeBucks (5108420) in NBA_Dataset2.
+```
+
+#How many NBAteams are contained in both df_filtered_dataset?
+#Pivoting data
+```{r}
+df_count_NBA_Dataset <- df_filtered_NBA_Dataset %>%
+  group_by(NBAteam) %>%
+  summarise(count = n()) %>%
+  pivot_longer(cols = -NBAteam, values_to = "count") %>%
+  select(-name) %>%
+  select(NBAteam, count) %>%
+  arrange(desc(count))
+# There are 20 NBAteams contained in the df_filtered_NBA_Dataset.
+
+df_count_NBA_Dataset2 <- df_filtered_NBA_Dataset2 %>%
+  group_by(NBAteam) %>%
+  summarise(count = n()) %>%
+  pivot_longer(cols = -NBAteam, values_to = "count") %>%
+  select(-name) %>%
+  select(NBAteam, count) %>%
+  arrange(desc(count))
+#There are 28 NBAteams contained in the df_filteed_NBA_Dataset2.
+
+```
+
+#How many distinct username appear in the same location in both df_filtered dataset?
+```{r}
+#Using Joins for the data 
+distinct_usernames <- inner_join(df_filtered_NBA_Dataset, df_filtered_NBA_Dataset2,
+                      by = c("username", "location")) %>%
+                      distinct(username, location) %>%
+                      nrow
+
+#There are integer 63 distinct usernames appear in the same location 
+```
+
+#What can you tell from the geographic location of these commenters?
+
+```{r}
+distinct_usernames_location <- inner_join(df_filtered_NBA_Dataset, df_filtered_NBA_Dataset2,
+                      by = c("username", "location")) %>%
+                      distinct(username, location)
+
+distinct_locations <- distinct_usernames_location %>%
+                      group_by(location) %>%
+                      summarise(count = n()) %>%
+                      arrange(desc(count))
+
+# display the top 30 distinct locations
+top_10_locations <- head(distinct_locations, 10)
+print(top_10_locations)
+
+# display the bottom 10 distinct locations
+bottom_10_locations <- tail(distinct_locations, 10)
+print(bottom_10_locations)
+
+# print the full list of distinct locations and their counts
+distinct_locations
+
+# we can infer that there is a strong interest in the NBA across various regions in the United States. The top locations where commenters appeared include major cities such as New York, Los Angeles, and Chicago, as well as other cities and states like Houston, Texas and Ohio. The bottom locations include less populated areas such as Guam and Northern Mariana Islands.
+```
+
+#What the top 30 words/phrases are popular to use when tweeting?
+```{r}
+library(ggplot2)
+library(tidytext)
+
+# combine comments from both datasets
+combined_data <- bind_rows(df_filtered_NBA_Dataset, df_filtered_NBA_Dataset2)
+
+# convert to tidy format
+tidy_data <- combined_data %>%
+  unnest_tokens(word, comment)
+
+# remove stop words
+tidy_data <- tidy_data %>%
+  anti_join(stop_words)
+
+# count occurrences of each word
+word_counts <- tidy_data %>%
+  count(word, sort = TRUE)
+
+# plot top 30 words
+top_30_words <- word_counts %>%
+  slice_max(n = 30, n)
+
+ggplot(top_30_words, aes(x = n, y = fct_reorder(word, n))) +
+  geom_col() +
+  labs(title = "Top 30 Words in NBA Tweets",
+       x = "Number of Occurrences",
+       y = "Words") +
+  theme_minimal()
+
+#The chart below shows that people like the most to post websites link when tweeting whereas "orlandomagic" are showing the least amount in NBA tweets, but "orlando" and "magic" appeared far more than "orlandomagic" in the top 30 words, assuming people like used abbreviation rather than calling the complete team.
+```
+
+#What are the top 10 negetive and positive words do people say?
+```{r}
+df_filtered_NBA_Dataset %>%
+  filter(n_distinct(NBAteam) >= 10) %>%
+  unnest_tokens(word, comment) %>%
+  anti_join(stop_words) %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup() %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment", y = NULL) +
+  ggtitle("NBA_Dataset")
+
+
+df_filtered_NBA_Dataset2 %>%
+  filter(n_distinct(NBAteam) >= 10) %>%
+  unnest_tokens(word, comment) %>%
+  anti_join(stop_words) %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup() %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment", y = NULL) +
+  ggtitle("NBA_Dataset2")
+
+#In charts, NBA_Dataset has most negative words "blame" whereas positive words "win" gets almost the full point. In the NBA_Dataset2, however, the most negative words is "boycott" whereas most positive words is "magic". This dataframe shows that there are more positive words than negative words in both dataset, representing people are in favor of positive words.
+```
+
+#What teams people like the most by doing sentiment analysis?
+```{r}
+library(dplyr)
+library(stopwords)
+
+# remove stop words
+tidy_data <- combined_data %>%
+  unnest_tokens(word, comment) %>%
+  anti_join(stop_words)
+
+# join with sentiment lexicon
+tidy_data <- tidy_data %>%
+  inner_join(get_sentiments("bing"))
+
+# count sentiment by team
+sentiment_count <- tidy_data %>%
+  group_by(NBAteam, sentiment) %>%
+  summarize(count = n()) %>%
+  ungroup()
+
+# calculate total sentiment count by team
+team_count <- sentiment_count %>%
+  group_by(NBAteam) %>%
+  summarize(total_count = sum(count))
+
+# calculate sentiment percentage by team
+sentiment_count <- sentiment_count %>%
+  left_join(team_count) %>%
+  mutate(percentage = count / total_count)
+
+# plot sentiment percentage by team
+ggplot(sentiment_count, aes(x = NBAteam, y = percentage, fill = sentiment)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(title = "Sentiment Analysis by NBA Team",
+       x = "Team",
+       y = "Percentage",
+       fill = "Sentiment") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#Among the 25 NBAteam, ClevelandCavaliers and NewOrleansPelicans are the two who received the most negetive comment, whereas DetroitPistons, LosAngelesClippers and NewYorkKnicks are the three who received the most positive comment. Assuming that people don't like ClevelandCavaliers and NewOrleansPelicans but really like DetroitPistons, LosAngelesClippers and NewYorkKnicks. 
+```
+
+#What are the relationships between retweet count and followers?
+```{r}
+# combine the two datasets
+df_combined <- bind_rows(df_filtered_NBA_Dataset, df_filtered_NBA_Dataset2)
+
+# plot retweet count vs. comment count
+ggplot(df_combined, aes(x = retweet_count, y = followers)) +
+#  geom_point() +
+  geom_smooth(method = "lm")
+  labs(title = "Relationship Between Retweet Count and followers",
+       x = "retweet_count",
+       y = "followers") +
+  theme_minimal() #+
+ # scale_x_continuous(trans = "log10")
+
+#The chart below show there are 95% confident rate that the more retweet count, the more followers it has, representing the significant care of positive relationship for the NBA event.
+```
